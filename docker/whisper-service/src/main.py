@@ -4,6 +4,7 @@ Procesa chunks de audio usando OpenAI Whisper
 """
 import os
 import logging
+import json
 import tempfile
 import time
 from typing import Dict, List

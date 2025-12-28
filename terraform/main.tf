@@ -1,6 +1,6 @@
 terraform {
   required_version = ">= 1.0"
-  
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -11,7 +11,7 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
-  
+
   default_tags {
     tags = {
       Project     = var.project_name
@@ -39,7 +39,7 @@ locals {
 # Networking Module
 module "networking" {
   source = "./modules/networking"
-  
+
   project_name = var.project_name
   aws_region   = var.aws_region
   vpc_cidr     = "10.0.0.0/16"
@@ -50,7 +50,7 @@ module "networking" {
 # Storage Module
 module "storage" {
   source = "./modules/storage"
-  
+
   project_name = var.project_name
   tags         = local.common_tags
 }
@@ -58,64 +58,64 @@ module "storage" {
 # Fog Nodes Module (SIN Load Balancer)
 module "fog_nodes" {
   source = "./modules/fog-nodes"
-  
-  project_name              = var.project_name
-  aws_region                = var.aws_region
-  vpc_id                    = module.networking.vpc_id
-  private_subnet_ids        = module.networking.private_subnet_ids
-  lambda_security_group_id  = module.networking.lambda_security_group_id
-  processed_bucket_name     = module.storage.s3_buckets.processed
-  processed_bucket_arn      = module.storage.s3_bucket_arns.processed
-  jobs_table_name           = module.storage.dynamodb_tables.jobs
-  jobs_table_arn            = module.storage.dynamodb_table_arns.jobs
-  fog_node_count            = var.fog_node_count
-  tags                      = local.common_tags
+
+  project_name             = var.project_name
+  aws_region               = var.aws_region
+  vpc_id                   = module.networking.vpc_id
+  private_subnet_ids       = module.networking.private_subnet_ids
+  lambda_security_group_id = module.networking.lambda_security_group_id
+  processed_bucket_name    = module.storage.s3_buckets.processed
+  processed_bucket_arn     = module.storage.s3_bucket_arns.processed
+  jobs_table_name          = module.storage.dynamodb_tables.jobs
+  jobs_table_arn           = module.storage.dynamodb_table_arns.jobs
+  fog_node_count           = var.fog_node_count
+  tags                     = local.common_tags
 }
 
 # Lambda Module
 module "lambda" {
   source = "./modules/lambda"
-  
-  project_name               = var.project_name
-  jobs_table_name            = module.storage.dynamodb_tables.jobs
-  jobs_table_arn             = module.storage.dynamodb_table_arns.jobs
-  transcriptions_table_name  = module.storage.dynamodb_tables.transcriptions
-  transcriptions_table_arn   = module.storage.dynamodb_table_arns.transcriptions
-  transcriptions_bucket_arn  = module.storage.s3_bucket_arns.transcriptions
-  fog_nodes_dns              = module.fog_nodes.service_discovery_dns
-  ecs_cluster_name           = module.fog_nodes.cluster_name
-  ecs_service_name           = module.fog_nodes.service_name
-  private_subnet_ids         = module.networking.private_subnet_ids
-  lambda_security_group_id   = module.networking.lambda_security_group_id
 
-  whisper_service_dns        = module.whisper_service.service_discovery_dns
-  processed_bucket_arn       = module.storage.s3_bucket_arns.processed
-  
-  tags                       = local.common_tags
+  project_name              = var.project_name
+  jobs_table_name           = module.storage.dynamodb_tables.jobs
+  jobs_table_arn            = module.storage.dynamodb_table_arns.jobs
+  transcriptions_table_name = module.storage.dynamodb_tables.transcriptions
+  transcriptions_table_arn  = module.storage.dynamodb_table_arns.transcriptions
+  transcriptions_bucket_arn = module.storage.s3_bucket_arns.transcriptions
+  fog_nodes_dns             = module.fog_nodes.service_discovery_dns
+  ecs_cluster_name          = module.fog_nodes.cluster_name
+  ecs_service_name          = module.fog_nodes.service_name
+  private_subnet_ids        = module.networking.private_subnet_ids
+  lambda_security_group_id  = module.networking.lambda_security_group_id
+
+  whisper_service_dns  = module.whisper_service.service_discovery_dns
+  processed_bucket_arn = module.storage.s3_bucket_arns.processed
+
+  tags = local.common_tags
 }
 
 # Whisper Service Module
 module "whisper_service" {
   source = "./modules/whisper-service"
 
-  project_name                   = var.project_name
-  aws_region                     = var.aws_region
-  tags                           = local.common_tags
-  
+  project_name = var.project_name
+  aws_region   = var.aws_region
+  tags         = local.common_tags
+
   ecs_cluster_id                 = module.fog_nodes.cluster_id
   service_discovery_namespace_id = module.fog_nodes.service_discovery_namespace_id
   private_subnet_ids             = module.networking.private_subnet_ids
-  security_group_id              = module.networking.lambda_security_group_id # Using same SG for simplicity
-  
-  processed_bucket_name          = module.storage.s3_buckets.processed
-  processed_bucket_arn           = module.storage.s3_bucket_arns.processed
-  transcriptions_bucket_name     = module.storage.s3_buckets.transcriptions
-  transcriptions_bucket_arn      = module.storage.s3_bucket_arns.transcriptions
-  
-  jobs_table_name                = module.storage.dynamodb_tables.jobs
-  jobs_table_arn                 = module.storage.dynamodb_table_arns.jobs
-  transcriptions_table_name      = module.storage.dynamodb_tables.transcriptions
-  transcriptions_table_arn       = module.storage.dynamodb_table_arns.transcriptions
+  security_group_id              = module.networking.ecs_tasks_security_group_id # Use the ECS SG that allows incoming traffic
+
+  processed_bucket_name      = module.storage.s3_buckets.processed
+  processed_bucket_arn       = module.storage.s3_bucket_arns.processed
+  transcriptions_bucket_name = module.storage.s3_buckets.transcriptions
+  transcriptions_bucket_arn  = module.storage.s3_bucket_arns.transcriptions
+
+  jobs_table_name           = module.storage.dynamodb_tables.jobs
+  jobs_table_arn            = module.storage.dynamodb_table_arns.jobs
+  transcriptions_table_name = module.storage.dynamodb_tables.transcriptions
+  transcriptions_table_arn  = module.storage.dynamodb_table_arns.transcriptions
 }
 
 # S3 Notification (Root to avoid circular dependency)
@@ -128,20 +128,20 @@ resource "aws_s3_bucket_notification" "processed_audio_trigger" {
     filter_prefix       = "audio/"
     filter_suffix       = ".wav"
   }
-  
+
   depends_on = [module.lambda] # Explicit dependency
 }
 
 # API Gateway Module
 module "api_gateway" {
   source = "./modules/api-gateway"
-  
-  project_name                 = var.project_name
-  url_processor_function_name  = module.lambda.url_processor_function_name
-  url_processor_invoke_arn     = module.lambda.url_processor_invoke_arn
-  query_handler_function_name  = module.lambda.query_handler_function_name
-  query_handler_invoke_arn     = module.lambda.query_handler_invoke_arn
-  tags                         = local.common_tags
+
+  project_name                = var.project_name
+  url_processor_function_name = module.lambda.url_processor_function_name
+  url_processor_invoke_arn    = module.lambda.url_processor_invoke_arn
+  query_handler_function_name = module.lambda.query_handler_function_name
+  query_handler_invoke_arn    = module.lambda.query_handler_invoke_arn
+  tags                        = local.common_tags
 }
 
 # Outputs
@@ -207,7 +207,7 @@ output "web_bucket_endpoint" {
 
 output "deployment_summary" {
   description = "Deployment Summary"
-  value = <<-EOT
+  value       = <<-EOT
   
   ========================================
   🎉 DEPLOYMENT SUCCESSFUL!

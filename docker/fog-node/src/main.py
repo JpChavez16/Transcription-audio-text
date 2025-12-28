@@ -290,62 +290,54 @@ def get_media_metadata(url: str) -> Dict:
         return {'duration': 0, 'has_audio': True}
 
 
-def stream_and_chunk_audio(url: str, job_id: str, total_duration: float) -> list:
     """
     Procesa audio usando FFmpeg pipe
     NO descarga el archivo completo - streaming directo
     """
     chunks_info = []
 
-    # FFmpeg command for streaming
+    # FFmpeg command for streaming RAW PCM (no header issues)
     ffmpeg_cmd = [
         'ffmpeg',
-        '-i', url,  # URL directa - NO descarga
-        '-f', 'wav',  # Output format
-        '-acodec', 'pcm_s16le',  # PCM codec
-        '-ar', str(SAMPLE_RATE),  # Sample rate
-        '-ac', str(CHANNELS),  # Channels
+        '-i', url,
+        '-f', 's16le',       # Raw PCM signed 16-bit little-endian
+        '-acodec', 'pcm_s16le',
+        '-ar', str(SAMPLE_RATE),
+        '-ac', str(CHANNELS),
         '-loglevel', 'error',
-        'pipe:1'  # Output to pipe, NO to file
+        'pipe:1'
     ]
 
     logger.info(f"Starting FFmpeg pipe for {job_id}")
 
     try:
-        # Start FFmpeg process
         process = subprocess.Popen(
             ffmpeg_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            bufsize=10**8  # 100MB buffer
+            bufsize=10**8
         )
 
         # Calculate chunk size in bytes
-        # 30 seconds * 16000 Hz * 2 bytes (16-bit) * 1 channel
+        # 30 seconds * 16000 Hz * 2 bytes * 1 channel
         chunk_size_bytes = CHUNK_DURATION * SAMPLE_RATE * 2 * CHANNELS
 
         chunk_num = 0
         total_chunks = int(total_duration / CHUNK_DURATION) + 1
 
-        # Read WAV header (44 bytes)
-        wav_header = process.stdout.read(44)
-
-        if len(wav_header) < 44:
-            raise Exception("Invalid WAV header")
-
         logger.info(f"Starting to process chunks (expected: {total_chunks})")
 
         while True:
-            # Read chunk of audio from pipe
-            audio_data = process.stdout.read(chunk_size_bytes)
+            # Read raw PCM chunk
+            pcm_data = process.stdout.read(chunk_size_bytes)
 
-            if not audio_data or len(audio_data) < 1000:
+            if not pcm_data:
                 break
 
-            # Create complete WAV for this chunk
-            chunk_wav = wav_header + audio_data
+            # Create distinct WAV header for THIS chunk
+            wav_header = create_wav_header(len(pcm_data))
+            chunk_wav = wav_header + pcm_data
 
-            # Upload chunk DIRECTLY to S3 (memory → S3)
             chunk_key = f"audio/{job_id}/chunks/chunk_{chunk_num:03d}.wav"
 
             logger.info(
@@ -361,7 +353,7 @@ def stream_and_chunk_audio(url: str, job_id: str, total_duration: float) -> list
             chunks_info.append({
                 'chunk_id': chunk_num,
                 's3_key': chunk_key,
-                'duration': min(CHUNK_DURATION, total_duration - (chunk_num * CHUNK_DURATION)),
+                'duration': len(pcm_data) / (SAMPLE_RATE * 2 * CHANNELS),
                 'size_bytes': len(chunk_wav)
             })
 
@@ -376,10 +368,6 @@ def stream_and_chunk_audio(url: str, job_id: str, total_duration: float) -> list
                 f"Processed {chunk_num}/{total_chunks} chunks via streaming"
             )
 
-            logger.info(
-                f"Job {job_id}: Chunk {chunk_num}/{total_chunks} uploaded")
-
-        # Wait for FFmpeg to finish
         process.wait(timeout=30)
 
         if process.returncode != 0:
@@ -387,18 +375,42 @@ def stream_and_chunk_audio(url: str, job_id: str, total_duration: float) -> list
             logger.error(f"FFmpeg error: {stderr}")
             raise Exception(f"FFmpeg failed: {stderr}")
 
-        logger.info(
-            f"FFmpeg streaming completed for {job_id} - {chunk_num} chunks")
-
         return chunks_info
 
-    except subprocess.TimeoutExpired:
-        process.kill()
-        raise Exception("FFmpeg timeout - stream took too long")
     except Exception as e:
         if 'process' in locals():
             process.kill()
         raise Exception(f"Streaming error: {str(e)}")
+
+
+def create_wav_header(data_size: int) -> bytes:
+    """Create a valid WAV header for 16-bit Mono 16kHz PCM"""
+    import struct
+    
+    # RIFF chunk
+    header = b'RIFF'
+    header += struct.pack('<I', data_size + 36)   # ChunkSize (Total - 8)
+    header += b'WAVE'
+    
+    # fmt subchunk
+    header += b'fmt '
+    header += struct.pack('<I', 16)               # Subchunk1Size (16 for PCM)
+    header += struct.pack('<H', 1)                # AudioFormat (1 = PCM)
+    header += struct.pack('<H', CHANNELS)         # NumChannels
+    header += struct.pack('<I', SAMPLE_RATE)      # SampleRate
+    
+    byte_rate = SAMPLE_RATE * CHANNELS * 2        # 16-bit = 2 bytes
+    header += struct.pack('<I', byte_rate)        # ByteRate
+    
+    block_align = CHANNELS * 2
+    header += struct.pack('<H', block_align)      # BlockAlign
+    header += struct.pack('<H', 16)               # BitsPerSample
+    
+    # data subchunk
+    header += b'data'
+    header += struct.pack('<I', data_size)        # Subchunk2Size
+    
+    return header
 
 
 def update_job_status(job_id: str, status: str, progress: float, message: str):

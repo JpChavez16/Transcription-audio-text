@@ -22,19 +22,20 @@ done
 
 echo "✅ Lambda functions packaged"
 
-# 2. Build Docker images
-echo "🐳 Building Docker images..."
+# # 2. Build Docker images
+# echo "🐳 Building Docker images..."
 
-cd docker/fog-node
-docker build -t podcast-fog-node:latest . --quiet
-cd ../..
+# cd docker/fog-node
+# docker build -t podcast-fog-node:latest . --quiet
+# cd ../..
 
-echo "✅ Docker images built"
+# echo "✅ Docker images built"
 
-echo ""
-echo "🎉 Build completed successfully!"
+# echo ""
+# echo "🎉 Build completed successfully!"
 echo ""
 echo "Next steps:"
+echo "Build docker images"
 echo "1. cd terraform"
 echo "2. terraform init"
 echo "3. terraform plan"

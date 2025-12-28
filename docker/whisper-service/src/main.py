@@ -157,11 +157,10 @@ async def transcribe_chunks_task(
 
     try:
         logger.info(f"Starting transcription for job {job_id}")
-        update_job_status(job_id, "transcribing", 20,
-                          f"Starting transcription of {len(s3_keys)} chunks")
-
-        all_segments = []
-        all_text = []
+        
+        # NOTE: In this architecture, status updates should probably be more granular
+        # or handled by a coordinator to avoid race conditions on the "status" field.
+        # For now, we will log efficient updates.
 
         total_chunks = len(s3_keys)
 
@@ -182,76 +181,59 @@ async def transcribe_chunks_task(
                     language
                 )
 
+                # Identify chunk ID from key (audio/{job_id}/chunks/chunk_001.wav)
+                try:
+                    chunk_filename = s3_key.split('/')[-1] # chunk_001.wav
+                    chunk_id_str = chunk_filename.split('_')[1].split('.')[0] # 001
+                    chunk_id = int(chunk_id_str)
+                except:
+                    chunk_id = 0 # Fallback
+
                 # Adjust timestamps based on chunk position
-                chunk_offset = idx * 30  # 30 seconds per chunk
+                chunk_offset = chunk_id * 30  # 30 seconds per chunk strict assumption
                 for seg in result['segments']:
                     seg['start'] += chunk_offset
                     seg['end'] += chunk_offset
-                    all_segments.append(seg)
-
-                all_text.append(result['text'])
-
+                
                 # Cleanup temp file
                 os.unlink(temp_file.name)
+                
+                # Save CHUNK transcription
+                chunk_data = {
+                    "job_id": job_id,
+                    "chunk_id": chunk_id,
+                    "text": result['text'],
+                    "segments": result['segments'],
+                    "language": result.get("language", "unknown"),
+                    "model_used": WHISPER_MODEL_NAME,
+                    "s3_key": s3_key,
+                    "timestamp": int(datetime.utcnow().timestamp())
+                }
+                
+                save_chunk_transcription(job_id, chunk_filename, chunk_data)
 
-                # Update progress
-                progress = 20 + ((idx + 1) / total_chunks) * 60
+                # Update progress (blind fire)
                 update_job_status(
                     job_id,
-                    "transcribing",
-                    int(progress),
-                    f"Transcribed {idx+1}/{total_chunks} chunks"
+                    "processing",
+                    0, # Progress calculation is hard in distributed mode without coordinator
+                    f"Transcribed chunk {chunk_id}"
                 )
 
                 logger.info(
-                    f"Chunk {idx+1}/{total_chunks} transcribed successfully")
+                    f"Chunk {chunk_id} transcribed successfully")
 
             except Exception as e:
                 logger.error(f"Error transcribing chunk {s3_key}: {e}")
                 continue
-
-        # Merge results
-        full_text = " ".join(all_text)
-
-        logger.info(
-            f"All chunks transcribed. Total text length: {len(full_text)}")
-        update_job_status(job_id, "post-processing", 85,
-                          "Merging transcriptions...")
-
-        # Save transcription
-        transcription_data = {
-            "job_id": job_id,
-            "text": full_text,
-            "segments": all_segments,
-            "language": result.get("language", "unknown"),
-            "model_used": WHISPER_MODEL_NAME,
-            "processing_time": time.time() - start_time,
-            "timestamp": int(datetime.utcnow().timestamp()),
-            "word_count": len(full_text.split()),
-            "segment_count": len(all_segments),
-            "chunks_processed": len(s3_keys)
-        }
-
-        # Save to DynamoDB
-        save_transcription(transcription_data)
-
-        # Save to S3 in multiple formats
-        save_to_s3(job_id, transcription_data)
-
-        update_job_status(
-            job_id,
-            "completed",
-            100,
-            f"Transcription completed - {len(s3_keys)} chunks processed"
-        )
-
-        processing_time = time.time() - start_time
-        logger.info(f"Job {job_id} completed in {processing_time:.2f}s")
+        
+        # We do NOT mark job as completed here, because we only processed a subset of chunks.
+        # The Post-Processor will determine completion.
 
     except Exception as e:
         logger.error(f"Error in transcription task: {e}", exc_info=True)
-        update_job_status(job_id, "failed", 0,
-                          f"Transcription failed: {str(e)}")
+        # Don't fail the whole job just for one chunk failure in this context
+
 
 
 def transcribe_with_whisper(audio_path: str, language: str = None) -> Dict:
@@ -285,8 +267,31 @@ def transcribe_with_whisper(audio_path: str, language: str = None) -> Dict:
         raise
 
 
+def save_chunk_transcription(job_id: str, chunk_filename: str, data: Dict):
+    """Save chunk transcription to S3"""
+    if not TRANSCRIPTION_BUCKET:
+        logger.warning("Transcription bucket not configured")
+        return
+
+    try:
+        # e.g. transcriptions/{job_id}/chunks/chunk_001.json
+        chunk_name = chunk_filename.replace('.wav', '.json')
+        key = f"transcriptions/{job_id}/chunks/{chunk_name}"
+
+        s3_client.put_object(
+            Bucket=TRANSCRIPTION_BUCKET,
+            Key=key,
+            Body=json.dumps(data, indent=2),
+            ContentType="application/json"
+        )
+
+        logger.info(f"Saved chunk transcription to S3: {key}")
+    except Exception as e:
+        logger.error(f"Error saving chunk to S3: {e}")
+
+
 def save_transcription(data: Dict):
-    """Save transcription to DynamoDB"""
+    """Save full transcription to DynamoDB"""
     if not trans_table:
         logger.warning("Transcriptions table not configured")
         return

@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/home/fm1258/Documents/Cloude/Transcription-audio-text/env/bin/python
 
 import sys
 import json

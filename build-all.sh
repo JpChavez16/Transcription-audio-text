@@ -11,11 +11,11 @@ mkdir -p lambda/dist
 for func in url_processor query_handler; do
     echo "  → Packaging $func..."
     cd lambda/$func
-
+    
     if [ -f requirements.txt ]; then
         pip3 install -r requirements.txt -t . --quiet
     fi
-
+    
     zip -r ../dist/${func}.zip . -x "*.pyc" "*__pycache__*" > /dev/null
     cd ../..
 done

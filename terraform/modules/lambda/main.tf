@@ -92,11 +92,11 @@ resource "aws_iam_role_policy" "lambda_ecs" {
 
 # URL Processor Lambda (CON VPC)
 resource "aws_lambda_function" "url_processor" {
-  filename = "${path.root}/../lambda/dist/url_processor.zip"
+  filename         = "${path.module}/../../../lambda/dist/url_processor.zip"
   function_name    = "${var.project_name}-url-processor"
   role             = aws_iam_role.lambda.arn
   handler          = "main.handler"
-  source_code_hash = filebase64sha256("${path.root}/../lambda/dist/url_processor.zip")
+  source_code_hash = filebase64sha256("${path.module}/../../../lambda/dist/url_processor.zip")
   runtime          = "python3.11"
   timeout          = 60
   memory_size      = 512
@@ -121,11 +121,11 @@ resource "aws_lambda_function" "url_processor" {
 
 # Query Handler Lambda (SIN VPC - más rápido)
 resource "aws_lambda_function" "query_handler" {
-  filename = "${path.root}/../lambda/dist/query_handler.zip"
+  filename         = "${path.module}/../../../lambda/dist/query_handler.zip"
   function_name    = "${var.project_name}-query-handler"
   role             = aws_iam_role.lambda.arn
   handler          = "main.handler"
-  source_code_hash = filebase64sha256("${path.root}/../lambda/dist/query_handler.zip")
+  source_code_hash = filebase64sha256("${path.module}/../../../lambda/dist/query_handler.zip")
   runtime          = "python3.11"
   timeout          = 30
   memory_size      = 512
@@ -138,6 +138,40 @@ resource "aws_lambda_function" "query_handler" {
   }
   
   tags = var.tags
+}
+
+# Trigger Transcription Lambda (CON VPC to access Whisper Service)
+resource "aws_lambda_function" "trigger_transcription" {
+  filename         = "${path.module}/../../../lambda/dist/trigger_transcription.zip"
+  function_name    = "${var.project_name}-trigger-transcription"
+  role             = aws_iam_role.lambda.arn
+  handler          = "main.handler"
+  source_code_hash = filebase64sha256("${path.module}/../../../lambda/dist/trigger_transcription.zip")
+  runtime          = "python3.11"
+  timeout          = 30
+  memory_size      = 128
+  
+  environment {
+    variables = {
+      WHISPER_SERVICE_DNS = var.whisper_service_dns
+    }
+  }
+  
+  # VPC Config required to talk to ECS Fargate in private subnet associated with Service Discovery
+  vpc_config {
+    subnet_ids         = var.private_subnet_ids
+    security_group_ids = [var.lambda_security_group_id]
+  }
+  
+  tags = var.tags
+}
+
+resource "aws_lambda_permission" "allow_s3" {
+  statement_id  = "AllowExecutionFromS3"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.trigger_transcription.function_name
+  principal     = "s3.amazonaws.com"
+  source_arn    = var.processed_bucket_arn
 }
 
 # Variables
@@ -162,6 +196,16 @@ variable "transcriptions_table_arn" {
 }
 
 variable "transcriptions_bucket_arn" {
+  type = string
+}
+
+variable "processed_bucket_arn" {
+  type = string
+}
+
+
+
+variable "whisper_service_dns" {
   type = string
 }
 
@@ -212,4 +256,8 @@ output "query_handler_arn" {
 
 output "query_handler_invoke_arn" {
   value = aws_lambda_function.query_handler.invoke_arn
+}
+
+output "trigger_transcription_function_arn" {
+  value = aws_lambda_function.trigger_transcription.arn
 }

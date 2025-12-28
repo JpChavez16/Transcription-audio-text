@@ -319,3 +319,7 @@ output "ecr_repository_url" {
 output "fog_nodes_security_group_id" {
   value = aws_security_group.fog_nodes.id
 }
+
+output "service_discovery_namespace_id" {
+  value = aws_service_discovery_private_dns_namespace.main.id
+}

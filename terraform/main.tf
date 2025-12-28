@@ -87,7 +87,49 @@ module "lambda" {
   ecs_service_name           = module.fog_nodes.service_name
   private_subnet_ids         = module.networking.private_subnet_ids
   lambda_security_group_id   = module.networking.lambda_security_group_id
+
+  whisper_service_dns        = module.whisper_service.service_discovery_dns
+  processed_bucket_arn       = module.storage.s3_bucket_arns.processed
+  
   tags                       = local.common_tags
+}
+
+# Whisper Service Module
+module "whisper_service" {
+  source = "./modules/whisper-service"
+
+  project_name                   = var.project_name
+  aws_region                     = var.aws_region
+  tags                           = local.common_tags
+  
+  ecs_cluster_id                 = module.fog_nodes.cluster_id
+  service_discovery_namespace_id = module.fog_nodes.service_discovery_namespace_id
+  private_subnet_ids             = module.networking.private_subnet_ids
+  security_group_id              = module.networking.lambda_security_group_id # Using same SG for simplicity
+  
+  processed_bucket_name          = module.storage.s3_buckets.processed
+  processed_bucket_arn           = module.storage.s3_bucket_arns.processed
+  transcriptions_bucket_name     = module.storage.s3_buckets.transcriptions
+  transcriptions_bucket_arn      = module.storage.s3_bucket_arns.transcriptions
+  
+  jobs_table_name                = module.storage.dynamodb_tables.jobs
+  jobs_table_arn                 = module.storage.dynamodb_table_arns.jobs
+  transcriptions_table_name      = module.storage.dynamodb_tables.transcriptions
+  transcriptions_table_arn       = module.storage.dynamodb_table_arns.transcriptions
+}
+
+# S3 Notification (Root to avoid circular dependency)
+resource "aws_s3_bucket_notification" "processed_audio_trigger" {
+  bucket = module.storage.s3_buckets.processed
+
+  lambda_function {
+    lambda_function_arn = module.lambda.trigger_transcription_function_arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "audio/"
+    filter_suffix       = ".wav"
+  }
+  
+  depends_on = [module.lambda] # Explicit dependency
 }
 
 # API Gateway Module
@@ -141,6 +183,11 @@ output "ecs_cluster_name" {
 output "fog_node_ecr_url" {
   description = "ECR Repository URL for Fog Node"
   value       = module.fog_nodes.ecr_repository_url
+}
+
+output "whisper_service_ecr_url" {
+  description = "ECR Repository URL for Whisper Service"
+  value       = module.whisper_service.ecr_repository_url
 }
 
 output "api_gateway_url" {

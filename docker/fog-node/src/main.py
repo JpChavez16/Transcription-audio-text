@@ -1,46 +1,55 @@
+"""
+Fog Node Main Application - STREAMING VERSION
+Procesa video/audio SIN descargar archivo completo
+Usa FFmpeg pipe para streaming directo
+"""
 import os
 import logging
-import asyncio
-from typing import Dict, Optional
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from pydantic import BaseModel, HttpUrl
-import boto3
-import redis
 import subprocess
 import hashlib
 import json
-from pathlib import Path
-import tempfile
-from io import BytesIO
+from typing import Dict, Optional
+from datetime import datetime
+
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from pydantic import BaseModel, HttpUrl
+import boto3
+import yt_dlp
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Initialize FastAPI
-app = FastAPI(title="Fog Node Streaming Service", version="2.0.0")
-
-# Initialize services
-s3_client = boto3.client('s3')
-redis_client = redis.Redis(
-    host=os.getenv('REDIS_HOST', 'localhost'),
-    port=int(os.getenv('REDIS_PORT', 6379)),
-    decode_responses=True
+app = FastAPI(
+    title="Fog Node Streaming Service",
+    version="3.0.0",
+    description="Processes media using FFmpeg streaming (no full download)"
 )
 
-# Configuration
-RAW_BUCKET = os.getenv('RAW_MEDIA_BUCKET')
+# Initialize AWS services
+s3_client = boto3.client('s3')
+dynamodb = boto3.resource('dynamodb')
+
+# Configuration from environment
 PROCESSED_BUCKET = os.getenv('PROCESSED_AUDIO_BUCKET')
-CACHE_TTL = 86400  # 24 hours
-CHUNK_DURATION = 30  # segundos por chunk
+JOBS_TABLE_NAME = os.getenv('JOBS_TABLE')
+CHUNK_DURATION = 30  # seconds per chunk
 SAMPLE_RATE = 16000  # Hz
 CHANNELS = 1  # Mono
 
-class DownloadRequest(BaseModel):
+# DynamoDB table
+jobs_table = dynamodb.Table(JOBS_TABLE_NAME) if JOBS_TABLE_NAME else None
+
+
+class ProcessRequest(BaseModel):
     url: HttpUrl
     job_id: str
-    priority: str = "normal"
     model_size: str = "medium"
+
 
 class ProcessStatus(BaseModel):
     job_id: str
@@ -49,90 +58,172 @@ class ProcessStatus(BaseModel):
     message: str
     chunks_processed: int = 0
 
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "service": "Fog Node Streaming Service",
+        "version": "3.0.0",
+        "status": "running",
+        "features": ["streaming", "no-download", "ffmpeg-pipe"]
+    }
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
     try:
-        redis_client.ping()
+        # Check FFmpeg
+        ffmpeg_ok = check_ffmpeg()
+
+        # Check S3 access
+        s3_ok = check_s3_access()
+
+        # Check DynamoDB access
+        dynamodb_ok = check_dynamodb_access()
+
+        all_healthy = ffmpeg_ok and s3_ok and dynamodb_ok
+
         return {
-            "status": "healthy",
-            "services": {"redis": "ok", "ffmpeg": check_ffmpeg()},
-            "version": "2.0.0-streaming"
+            "status": "healthy" if all_healthy else "degraded",
+            "version": "3.0.0",
+            "services": {
+                "ffmpeg": "ok" if ffmpeg_ok else "error",
+                "s3": "ok" if s3_ok else "error",
+                "dynamodb": "ok" if dynamodb_ok else "error"
+            },
+            "processing_method": "streaming_no_download"
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         raise HTTPException(status_code=503, detail="Service unhealthy")
 
-def check_ffmpeg():
-    """Verifica que FFmpeg está instalado"""
+
+def check_ffmpeg() -> bool:
+    """Verify FFmpeg is installed"""
     try:
-        subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
-        return "ok"
+        subprocess.run(
+            ['ffmpeg', '-version'],
+            capture_output=True,
+            check=True,
+            timeout=5
+        )
+        return True
     except:
-        return "error"
+        return False
+
+
+def check_s3_access() -> bool:
+    """Verify S3 access"""
+    try:
+        if not PROCESSED_BUCKET:
+            return False
+        s3_client.head_bucket(Bucket=PROCESSED_BUCKET)
+        return True
+    except:
+        return False
+
+
+def check_dynamodb_access() -> bool:
+    """Verify DynamoDB access"""
+    try:
+        if not jobs_table:
+            return False
+        jobs_table.table_status
+        return True
+    except:
+        return False
+
 
 @app.post("/process")
-async def process_media(request: DownloadRequest, background_tasks: BackgroundTasks):
+async def process_media(request: ProcessRequest, background_tasks: BackgroundTasks):
     """
-    Procesa media SIN descargar completo
+    Process media SIN descargar completo
     Usa FFmpeg pipe para streaming directo
     """
     url = str(request.url)
     job_id = request.job_id
-    
-    # Check cache
-    cache_key = f"fog:processed:{hashlib.md5(url.encode()).hexdigest()}"
-    cached_result = redis_client.get(cache_key)
-    
-    if cached_result:
-        logger.info(f"Cache hit for job {job_id}")
-        return json.loads(cached_result)
-    
-    # Process in background
+
+    logger.info(f"Received processing request for job {job_id}")
+
+    # Start processing in background
     background_tasks.add_task(
         process_streaming_task,
         url,
         job_id,
-        cache_key,
         request.model_size
     )
-    
+
     return {
         "job_id": job_id,
         "status": "processing",
-        "message": "Streaming processing started - NO full download"
+        "message": "Streaming processing started - NO full download",
+        "processing_method": "streaming"
+    }
+    return {
+        "job_id": job_id,
+        "status": "processing",
+        "message": "Streaming processing started - NO full download",
+        "processing_method": "streaming"
     }
 
-async def process_streaming_task(
-    url: str,
-    job_id: str,
-    cache_key: str,
-    model_size: str
-):
+
+def get_stream_url(url: str) -> str:
+    """
+    Extract direct stream URL using yt-dlp
+    """
+    try:
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'quiet': True,
+            'no_warnings': True,
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            return info['url']
+    except Exception as e:
+        logger.warning(f"yt-dlp extraction failed: {e}. using original URL.")
+        return url
+
+
+async def process_streaming_task(url: str, job_id: str, model_size: str):
     """
     Background task para procesamiento streaming
     NO descarga el archivo completo
     """
     try:
-        update_status(job_id, "starting", 5, "Validating URL")
-        
+        logger.info(f"Starting streaming processing for job {job_id}")
+        update_job_status(job_id, "streaming", 5,
+                          "Starting FFmpeg pipe streaming")
+
         # 1. Obtener metadata sin descargar
-        metadata = await get_media_metadata(url)
+        logger.info(f"Resolving stream URL for {url}")
+        stream_url = get_stream_url(url)
+
+        logger.info(f"Getting metadata for stream")
+        metadata = get_media_metadata(stream_url)
         duration = metadata.get('duration', 0)
-        
-        update_status(job_id, "streaming", 10, "Starting FFmpeg pipe streaming")
-        
+
+        logger.info(f"Media duration: {duration}s")
+        update_job_status(job_id, "streaming", 10,
+                          f"Media duration: {duration}s")
+
         # 2. Procesar con FFmpeg pipe (NO descarga completa)
-        chunks_info = await stream_and_chunk_audio(
-            url,
+        logger.info(f"Starting FFmpeg streaming for {url}")
+        chunks_info = stream_and_chunk_audio(stream_url, job_id, duration)
+
+        logger.info(
+            f"Streaming completed. Processed {len(chunks_info)} chunks")
+        update_job_status(
             job_id,
-            duration,
-            model_size
+            "completed",
+            100,
+            f"Streaming processing completed - {len(chunks_info)} chunks created"
         )
-        
-        update_status(job_id, "finalizing", 95, "Finalizing processing")
-        
-        # 3. Guardar metadata
+
+        # 3. Store metadata
         result = {
             "job_id": job_id,
             "status": "completed",
@@ -142,22 +233,17 @@ async def process_streaming_task(
             "processing_method": "streaming_no_download",
             "model_size": model_size
         }
-        
-        # Cache result
-        redis_client.setex(cache_key, CACHE_TTL, json.dumps(result))
-        
-        update_status(job_id, "completed", 100, "Streaming processing completed")
-        
-        logger.info(f"Job {job_id} completed - {len(chunks_info)} chunks processed")
-        
+
+        logger.info(f"Job {job_id} completed successfully")
         return result
-        
+
     except Exception as e:
-        logger.error(f"Error processing job {job_id}: {e}")
-        update_status(job_id, "failed", 0, str(e))
+        logger.error(f"Error processing job {job_id}: {e}", exc_info=True)
+        update_job_status(job_id, "failed", 0, f"Processing failed: {str(e)}")
         raise
 
-async def get_media_metadata(url: str) -> Dict:
+
+def get_media_metadata(url: str) -> Dict:
     """
     Obtiene metadata del video SIN descargarlo
     Usa ffprobe
@@ -170,7 +256,7 @@ async def get_media_metadata(url: str) -> Dict:
         '-show_streams',
         url
     ]
-    
+
     try:
         result = subprocess.run(
             cmd,
@@ -179,35 +265,39 @@ async def get_media_metadata(url: str) -> Dict:
             check=True,
             timeout=30
         )
-        
+
         data = json.loads(result.stdout)
-        
-        # Extraer duración
+
+        # Extract duration
         duration = float(data.get('format', {}).get('duration', 0))
-        
+
         return {
             'duration': duration,
             'format': data.get('format', {}).get('format_name'),
-            'has_audio': any(s.get('codec_type') == 'audio' 
-                           for s in data.get('streams', []))
+            'has_audio': any(
+                s.get('codec_type') == 'audio'
+                for s in data.get('streams', [])
+            )
         }
+    except subprocess.TimeoutExpired:
+        logger.error("FFprobe timeout")
+        raise Exception("Timeout getting media metadata")
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON from ffprobe: {e}")
+        raise Exception("Invalid media format")
     except Exception as e:
         logger.error(f"Error getting metadata: {e}")
         return {'duration': 0, 'has_audio': True}
 
-async def stream_and_chunk_audio(
-    url: str,
-    job_id: str,
-    total_duration: float,
-    model_size: str
-) -> list:
+
+def stream_and_chunk_audio(url: str, job_id: str, total_duration: float) -> list:
     """
     Procesa audio usando FFmpeg pipe
     NO descarga el archivo completo - streaming directo
     """
     chunks_info = []
-    
-    # FFmpeg comando para streaming
+
+    # FFmpeg command for streaming
     ffmpeg_cmd = [
         'ffmpeg',
         '-i', url,  # URL directa - NO descarga
@@ -216,147 +306,166 @@ async def stream_and_chunk_audio(
         '-ar', str(SAMPLE_RATE),  # Sample rate
         '-ac', str(CHANNELS),  # Channels
         '-loglevel', 'error',
-        'pipe:1'  # Output a pipe, NO a archivo
+        'pipe:1'  # Output to pipe, NO to file
     ]
-    
+
     logger.info(f"Starting FFmpeg pipe for {job_id}")
-    
+
     try:
-        # Iniciar proceso FFmpeg
+        # Start FFmpeg process
         process = subprocess.Popen(
             ffmpeg_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             bufsize=10**8  # 100MB buffer
         )
-        
-        # Calcular tamaño de chunk en bytes
-        # 30 segundos * 16000 Hz * 2 bytes (16-bit) * 1 canal
+
+        # Calculate chunk size in bytes
+        # 30 seconds * 16000 Hz * 2 bytes (16-bit) * 1 channel
         chunk_size_bytes = CHUNK_DURATION * SAMPLE_RATE * 2 * CHANNELS
-        
+
         chunk_num = 0
         total_chunks = int(total_duration / CHUNK_DURATION) + 1
-        
-        # Leer cabecera WAV (44 bytes)
+
+        # Read WAV header (44 bytes)
         wav_header = process.stdout.read(44)
-        
+
+        if len(wav_header) < 44:
+            raise Exception("Invalid WAV header")
+
+        logger.info(f"Starting to process chunks (expected: {total_chunks})")
+
         while True:
-            # Leer chunk de audio del pipe
+            # Read chunk of audio from pipe
             audio_data = process.stdout.read(chunk_size_bytes)
-            
+
             if not audio_data or len(audio_data) < 1000:
                 break
-            
-            # Crear WAV completo para este chunk
+
+            # Create complete WAV for this chunk
             chunk_wav = wav_header + audio_data
-            
-            # Upload chunk DIRECTAMENTE a S3 (memoria → S3)
+
+            # Upload chunk DIRECTLY to S3 (memory → S3)
             chunk_key = f"audio/{job_id}/chunks/chunk_{chunk_num:03d}.wav"
-            
+
+            logger.info(
+                f"Uploading chunk {chunk_num} ({len(chunk_wav)} bytes)")
+
             s3_client.put_object(
                 Bucket=PROCESSED_BUCKET,
                 Key=chunk_key,
                 Body=chunk_wav,
                 ContentType='audio/wav'
             )
-            
+
             chunks_info.append({
                 'chunk_id': chunk_num,
                 's3_key': chunk_key,
                 'duration': min(CHUNK_DURATION, total_duration - (chunk_num * CHUNK_DURATION)),
                 'size_bytes': len(chunk_wav)
             })
-            
+
             chunk_num += 1
-            
-            # Actualizar progreso
+
+            # Update progress
             progress = min(90, 10 + (chunk_num / total_chunks) * 80)
-            update_status(
+            update_job_status(
                 job_id,
                 "streaming",
                 progress,
                 f"Processed {chunk_num}/{total_chunks} chunks via streaming"
             )
-            
-            logger.info(f"Job {job_id}: Chunk {chunk_num} uploaded ({len(chunk_wav)} bytes)")
-        
-        # Esperar a que FFmpeg termine
+
+            logger.info(
+                f"Job {job_id}: Chunk {chunk_num}/{total_chunks} uploaded")
+
+        # Wait for FFmpeg to finish
         process.wait(timeout=30)
-        
+
         if process.returncode != 0:
             stderr = process.stderr.read().decode()
-            raise Exception(f"FFmpeg error: {stderr}")
-        
-        logger.info(f"FFmpeg streaming completed for {job_id} - {chunk_num} chunks")
-        
+            logger.error(f"FFmpeg error: {stderr}")
+            raise Exception(f"FFmpeg failed: {stderr}")
+
+        logger.info(
+            f"FFmpeg streaming completed for {job_id} - {chunk_num} chunks")
+
         return chunks_info
-        
+
     except subprocess.TimeoutExpired:
         process.kill()
         raise Exception("FFmpeg timeout - stream took too long")
     except Exception as e:
-        if process:
+        if 'process' in locals():
             process.kill()
         raise Exception(f"Streaming error: {str(e)}")
 
-def update_status(job_id: str, status: str, progress: float, message: str):
-    """Update job status in Redis"""
-    status_data = {
-        "job_id": job_id,
-        "status": status,
-        "progress": progress,
-        "message": message,
-        "processing_method": "streaming"
-    }
-    
-    redis_client.setex(
-        f"fog:status:{job_id}",
-        3600,  # 1 hour TTL
-        json.dumps(status_data)
-    )
+
+def update_job_status(job_id: str, status: str, progress: float, message: str):
+    """Update job status in DynamoDB"""
+    if not jobs_table:
+        logger.warning("DynamoDB table not configured, skipping status update")
+        return
+
+    try:
+        jobs_table.update_item(
+            Key={"jobId": job_id},
+            UpdateExpression="SET #status = :status, progress = :progress, message = :message, updatedAt = :updated",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={
+                ":status": status,
+                ":progress": int(progress),
+                ":message": message,
+                ":updated": int(datetime.utcnow().timestamp())
+            }
+        )
+        logger.info(
+            f"Updated job {job_id}: {status} - {progress}% - {message}")
+    except Exception as e:
+        logger.error(f"Error updating job status: {e}")
+
 
 @app.get("/status/{job_id}")
 async def get_status(job_id: str):
     """Get processing status"""
-    status_key = f"fog:status:{job_id}"
-    status_data = redis_client.get(status_key)
-    
-    if not status_data:
-        raise HTTPException(status_code=404, detail="Job not found")
-    
-    return json.loads(status_data)
+    if not jobs_table:
+        raise HTTPException(status_code=503, detail="DynamoDB not configured")
+
+    try:
+        response = jobs_table.get_item(Key={"jobId": job_id})
+
+        if "Item" not in response:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        return response["Item"]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/metrics")
 async def get_metrics():
     """Get fog node metrics"""
-    cache_info = redis_client.info('stats')
-    
     return {
-        "cache_hits": cache_info.get('keyspace_hits', 0),
-        "cache_misses": cache_info.get('keyspace_misses', 0),
-        "total_keys": redis_client.dbsize(),
         "processing_method": "streaming_no_download",
-        "version": "2.0.0"
+        "version": "3.0.0",
+        "chunk_duration": CHUNK_DURATION,
+        "sample_rate": SAMPLE_RATE,
+        "channels": CHANNELS
     }
-
-@app.post("/test-stream")
-async def test_stream(url: str):
-    """
-    Endpoint de prueba para verificar streaming
-    """
-    try:
-        metadata = await get_media_metadata(url)
-        return {
-            "status": "success",
-            "metadata": metadata,
-            "message": "URL is streamable"
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e)
-        }
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+
+    logger.info("Starting Fog Node Streaming Service v3.0.0")
+    logger.info(f"Processed bucket: {PROCESSED_BUCKET}")
+    logger.info(f"Jobs table: {JOBS_TABLE_NAME}")
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8080,
+        log_level="info"
+    )

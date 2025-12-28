@@ -5,6 +5,6 @@ terraform {
     region = "us-east-1"
 
     # Descomentar después de crear el bucket
-   # dynamodb_table = "terraform-state-lock"
+    # dynamodb_table = "terraform-state-lock"
   }
 }

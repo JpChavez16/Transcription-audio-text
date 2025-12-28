@@ -161,12 +161,6 @@ async def process_media(request: ProcessRequest, background_tasks: BackgroundTas
         "message": "Streaming processing started - NO full download",
         "processing_method": "streaming"
     }
-    return {
-        "job_id": job_id,
-        "status": "processing",
-        "message": "Streaming processing started - NO full download",
-        "processing_method": "streaming"
-    }
 
 
 def get_stream_url(url: str) -> str:
@@ -184,8 +178,17 @@ def get_stream_url(url: str) -> str:
             info = ydl.extract_info(url, download=False)
             return info['url']
     except Exception as e:
-        logger.warning(f"yt-dlp extraction failed: {e}. using original URL.")
-        return url
+        logger.error(f"yt-dlp extraction failed: {str(e)}")
+        
+        # Fallback: If it looks like a direct media file, try using it directly
+        lower_url = url.lower()
+        if any(lower_url.endswith(ext) for ext in ['.mp3', '.wav', '.mp4', '.mkv', '.ogg', '.flac', '.webm']):
+            logger.info("URL appears to be a direct media file, attempting to use directly...")
+            return url
+            
+        # CRITICAL: Do NOT return the original URL, as FFmpeg cannot handle it.
+        # We must fail the job here to see the actual error.
+        raise Exception(f"Failed to resolve stream URL: {str(e)}")
 
 
 async def process_streaming_task(url: str, job_id: str, model_size: str):
@@ -290,6 +293,7 @@ def get_media_metadata(url: str) -> Dict:
         return {'duration': 0, 'has_audio': True}
 
 
+def stream_and_chunk_audio(url: str, job_id: str, total_duration: float) -> list:
     """
     Procesa audio usando FFmpeg pipe
     NO descarga el archivo completo - streaming directo

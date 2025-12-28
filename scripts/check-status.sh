@@ -10,4 +10,4 @@ fi
 
 echo "🔍 Checking status for Job: $JOB_ID"
 
-curl -s -X GET "$API_URL/jobs/$JOB_ID" | json_pp
+curl -s -X GET "$API_URL/jobs/$JOB_ID" | python3 -m json.tool

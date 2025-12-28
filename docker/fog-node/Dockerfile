@@ -17,6 +17,8 @@ WORKDIR /app
 # Copy requirements first (for caching)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# Force install latest yt-dlp from master to fix YouTube bot detection issues
+RUN pip install --no-cache-dir --force-reinstall https://github.com/yt-dlp/yt-dlp/archive/master.zip
 
 # Copy application code
 COPY src/ ./src/

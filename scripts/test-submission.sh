@@ -16,8 +16,7 @@ if [ -z "$API_URL" ]; then
 fi
 
 # YouTube URL to test (default: specific video)
-VIDEO_URL=${2:-"https://www.youtube.com/watch?v=baIGGOeDArA"} # Default: "Python in 100 Seconds" (Short, good for testing)
-
+VIDEO_URL=${2:-"https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"} # Reliable test URL (no bot detection)
 echo "🚀 Submitting Job to: $API_URL/jobs"
 echo "📺 Video URL: $VIDEO_URL"
 

@@ -3,7 +3,7 @@
 # S3 Bucket for Raw Media
 resource "aws_s3_bucket" "raw_media" {
   bucket = "${var.project_name}-raw-${data.aws_caller_identity.current.account_id}"
-  
+
   tags = merge(var.tags, {
     Name = "Raw Media Storage"
   })
@@ -11,7 +11,7 @@ resource "aws_s3_bucket" "raw_media" {
 
 resource "aws_s3_bucket_versioning" "raw_media" {
   bucket = aws_s3_bucket.raw_media.id
-  
+
   versioning_configuration {
     status = "Enabled"
   }
@@ -20,7 +20,7 @@ resource "aws_s3_bucket_versioning" "raw_media" {
 # S3 Bucket for Processed Audio
 resource "aws_s3_bucket" "processed" {
   bucket = "${var.project_name}-processed-${data.aws_caller_identity.current.account_id}"
-  
+
   tags = merge(var.tags, {
     Name = "Processed Audio Storage"
   })
@@ -29,7 +29,7 @@ resource "aws_s3_bucket" "processed" {
 # S3 Bucket for Transcriptions
 resource "aws_s3_bucket" "transcriptions" {
   bucket = "${var.project_name}-transcriptions-${data.aws_caller_identity.current.account_id}"
-  
+
   tags = merge(var.tags, {
     Name = "Transcriptions Storage"
   })
@@ -37,7 +37,7 @@ resource "aws_s3_bucket" "transcriptions" {
 
 resource "aws_s3_bucket_versioning" "transcriptions" {
   bucket = aws_s3_bucket.transcriptions.id
-  
+
   versioning_configuration {
     status = "Enabled"
   }
@@ -46,7 +46,7 @@ resource "aws_s3_bucket_versioning" "transcriptions" {
 # S3 Bucket for Web App
 resource "aws_s3_bucket" "web_app" {
   bucket = "${var.project_name}-web-${data.aws_caller_identity.current.account_id}"
-  
+
   tags = merge(var.tags, {
     Name = "Web Application"
   })
@@ -54,11 +54,11 @@ resource "aws_s3_bucket" "web_app" {
 
 resource "aws_s3_bucket_website_configuration" "web_app" {
   bucket = aws_s3_bucket.web_app.id
-  
+
   index_document {
     suffix = "index.html"
   }
-  
+
   error_document {
     key = "error.html"
   }
@@ -66,7 +66,7 @@ resource "aws_s3_bucket_website_configuration" "web_app" {
 
 resource "aws_s3_bucket_public_access_block" "web_app" {
   bucket = aws_s3_bucket.web_app.id
-  
+
   block_public_acls       = false
   block_public_policy     = false
   ignore_public_acls      = false
@@ -75,7 +75,7 @@ resource "aws_s3_bucket_public_access_block" "web_app" {
 
 resource "aws_s3_bucket_policy" "web_app" {
   bucket = aws_s3_bucket.web_app.id
-  
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -88,45 +88,47 @@ resource "aws_s3_bucket_policy" "web_app" {
       }
     ]
   })
+
+  depends_on = [aws_s3_bucket_public_access_block.web_app]
 }
 
 # DynamoDB Table for Jobs
 resource "aws_dynamodb_table" "jobs" {
-  name           = "${var.project_name}-jobs"
-  billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "jobId"
-  
+  name         = "${var.project_name}-jobs"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "jobId"
+
   attribute {
     name = "jobId"
     type = "S"
   }
-  
+
   attribute {
     name = "status"
     type = "S"
   }
-  
+
   attribute {
     name = "createdAt"
     type = "N"
   }
-  
+
   global_secondary_index {
     name            = "StatusIndex"
     hash_key        = "status"
     range_key       = "createdAt"
     projection_type = "ALL"
   }
-  
+
   ttl {
     attribute_name = "ttl"
     enabled        = true
   }
-  
+
   point_in_time_recovery {
     enabled = true
   }
-  
+
   tags = merge(var.tags, {
     Name = "Jobs Table"
   })
@@ -134,31 +136,31 @@ resource "aws_dynamodb_table" "jobs" {
 
 # DynamoDB Table for Transcriptions
 resource "aws_dynamodb_table" "transcriptions" {
-  name           = "${var.project_name}-transcriptions"
-  billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "transcriptionId"
-  
+  name         = "${var.project_name}-transcriptions"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "transcriptionId"
+
   attribute {
     name = "transcriptionId"
     type = "S"
   }
-  
+
   attribute {
     name = "jobId"
     type = "S"
   }
-  
+
   global_secondary_index {
     name            = "JobIndex"
     hash_key        = "jobId"
     projection_type = "ALL"
   }
-  
+
   ttl {
     attribute_name = "ttl"
     enabled        = true
   }
-  
+
   tags = merge(var.tags, {
     Name = "Transcriptions Table"
   })

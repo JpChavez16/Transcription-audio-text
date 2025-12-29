@@ -223,7 +223,8 @@ async def process_streaming_task(url: str, job_id: str, model_size: str):
             job_id,
             "completed",
             100,
-            f"Streaming processing completed - {len(chunks_info)} chunks created"
+            f"Streaming processing completed - {len(chunks_info)} chunks created",
+            totalChunks=len(chunks_info)
         )
 
         # 3. Store metadata
@@ -417,23 +418,33 @@ def create_wav_header(data_size: int) -> bytes:
     return header
 
 
-def update_job_status(job_id: str, status: str, progress: float, message: str):
+def update_job_status(job_id: str, status: str, progress: float, message: str, **kwargs):
     """Update job status in DynamoDB"""
     if not jobs_table:
         logger.warning("DynamoDB table not configured, skipping status update")
         return
 
     try:
+        expression_names = {"#status": "status"}
+        expression_values = {
+            ":status": status,
+            ":progress": int(progress),
+            ":message": message,
+            ":updated": int(datetime.utcnow().timestamp())
+        }
+        
+        update_expr = "SET #status = :status, progress = :progress, message = :message, updatedAt = :updated"
+
+        # Add any extra fields passed in kwargs (e.g., totalChunks)
+        for key, value in kwargs.items():
+            update_expr += f", {key} = :{key}"
+            expression_values[f":{key}"] = value
+
         jobs_table.update_item(
             Key={"jobId": job_id},
-            UpdateExpression="SET #status = :status, progress = :progress, message = :message, updatedAt = :updated",
-            ExpressionAttributeNames={"#status": "status"},
-            ExpressionAttributeValues={
-                ":status": status,
-                ":progress": int(progress),
-                ":message": message,
-                ":updated": int(datetime.utcnow().timestamp())
-            }
+            UpdateExpression=update_expr,
+            ExpressionAttributeNames=expression_names,
+            ExpressionAttributeValues=expression_values
         )
         logger.info(
             f"Updated job {job_id}: {status} - {progress}% - {message}")

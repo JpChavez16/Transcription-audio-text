@@ -1,37 +1,43 @@
 #!/bin/bash
-
-# Configuration
-PROJECT_NAME="podcast-transcription"
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+CLUSTER_NAME="podcast-transcription-fog-cluster"
 REGION="us-east-1"
 
-echo "🧹 Force Cleaning Orphaned Resources..."
+echo "🧹 Cleaning up ECS Cluster: $CLUSTER_NAME..."
 
-# 1. Delete ECR Repositories
-REPOS="$PROJECT_NAME-fog-node $PROJECT_NAME-whisper-service"
-for repo in $REPOS; do
-    echo "   Checking ECR repo: $repo"
-    if aws ecr describe-repositories --repository-names $repo --region $REGION >/dev/null 2>&1; then
-        echo "   🗑️  Deleting ECR repo: $repo"
-        aws ecr delete-repository --repository-name $repo --region $REGION --force >/dev/null
-    else
-        echo "   - Not found, skipping."
-    fi
-done
+# 1. List and Delete All Services
+echo "Fetching services..."
+SERVICES=$(aws ecs list-services --cluster $CLUSTER_NAME --region $REGION --query "serviceArns[]" --output text)
 
-# 2. Delete Web Bucket
-WEB_BUCKET="$PROJECT_NAME-web-$ACCOUNT_ID"
-echo "   Checking S3 bucket: $WEB_BUCKET"
-if aws s3 ls "s3://$WEB_BUCKET" 2>&1 | grep -q 'NoSuchBucket'; then
-     echo "   - Not found, skipping."
+if [ -n "$SERVICES" ] && [ "$SERVICES" != "None" ]; then
+    for SERVICE_ARN in $SERVICES; do
+        SERVICE_NAME=$(basename $SERVICE_ARN)
+        echo "🚨 Deleting service: $SERVICE_NAME"
+        
+        # Update desired count to 0 to drain tasks
+        aws ecs update-service --cluster $CLUSTER_NAME --service $SERVICE_ARN --desired-count 0 --region $REGION > /dev/null
+        
+        # Force delete the service
+        aws ecs delete-service --cluster $CLUSTER_NAME --service $SERVICE_ARN --force --region $REGION > /dev/null
+        echo "   ✅ Service $SERVICE_NAME deleted."
+    done
 else
-    echo "   🗑️  Deleting bucket: $WEB_BUCKET"
-    aws s3 rb "s3://$WEB_BUCKET" --force >/dev/null
+    echo "   ℹ️ No active services found."
 fi
 
-# 3. Clean Terraform State (crucial since we just confused it)
-echo "   Refresh Terraform State..."
-cd ../terraform
-terraform refresh
+# 2. Stop All Running Tasks
+echo "Fetching running tasks..."
+TASKS=$(aws ecs list-tasks --cluster $CLUSTER_NAME --region $REGION --query "taskArns[]" --output text)
 
-echo "✅ Clean up complete."
+if [ -n "$TASKS" ] && [ "$TASKS" != "None" ]; then
+    for TASK_ARN in $TASKS; do
+        echo "� Stopping task: $TASK_ARN"
+        aws ecs stop-task --cluster $CLUSTER_NAME --task $TASK_ARN --region $REGION > /dev/null
+    done
+    echo "   ✅ All tasks stopped."
+else
+    echo "   ℹ️ No running tasks found."
+fi
+
+echo "==========================================="
+echo "🎉 Cleanup complete. You can now run 'terraform destroy' again."
+echo "==========================================="

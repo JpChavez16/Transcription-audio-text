@@ -4,11 +4,11 @@
 resource "aws_api_gateway_rest_api" "main" {
   name        = "${var.project_name}-api"
   description = "API for Podcast Transcription System"
-  
+
   endpoint_configuration {
     types = ["REGIONAL"]
   }
-  
+
   tags = var.tags
 }
 
@@ -49,7 +49,7 @@ resource "aws_api_gateway_integration" "options_jobs" {
   resource_id = aws_api_gateway_resource.jobs.id
   http_method = aws_api_gateway_method.options_jobs.http_method
   type        = "MOCK"
-  
+
   request_templates = {
     "application/json" = "{\"statusCode\": 200}"
   }
@@ -60,7 +60,7 @@ resource "aws_api_gateway_method_response" "options_jobs" {
   resource_id = aws_api_gateway_resource.jobs.id
   http_method = aws_api_gateway_method.options_jobs.http_method
   status_code = "200"
-  
+
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = true
     "method.response.header.Access-Control-Allow-Methods" = true
@@ -73,7 +73,7 @@ resource "aws_api_gateway_integration_response" "options_jobs" {
   resource_id = aws_api_gateway_resource.jobs.id
   http_method = aws_api_gateway_method.options_jobs.http_method
   status_code = "200"
-  
+
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
     "method.response.header.Access-Control-Allow-Methods" = "'GET,OPTIONS,POST,PUT,DELETE'"
@@ -96,7 +96,7 @@ resource "aws_api_gateway_method" "get_job" {
   resource_id   = aws_api_gateway_resource.job_id.id
   http_method   = "GET"
   authorization = "NONE"
-  
+
   request_parameters = {
     "method.request.path.jobId" = true
   }
@@ -131,7 +131,7 @@ resource "aws_lambda_permission" "query_handler" {
 # Deployment
 resource "aws_api_gateway_deployment" "main" {
   rest_api_id = aws_api_gateway_rest_api.main.id
-  
+
   triggers = {
     redeployment = sha1(jsonencode([
       aws_api_gateway_resource.jobs.id,
@@ -141,7 +141,7 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_integration.get_job.id,
     ]))
   }
-  
+
   lifecycle {
     create_before_destroy = true
   }
@@ -152,7 +152,7 @@ resource "aws_api_gateway_stage" "prod" {
   deployment_id = aws_api_gateway_deployment.main.id
   rest_api_id   = aws_api_gateway_rest_api.main.id
   stage_name    = "prod"
-  
+
   tags = var.tags
 }
 

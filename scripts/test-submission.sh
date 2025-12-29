@@ -16,7 +16,7 @@ if [ -z "$API_URL" ]; then
 fi
 
 # YouTube URL to test (default: specific video)
-VIDEO_URL=${2:-"https://peertube.tv/w/9MUYw3f63eYaiV92C36uHe"} # Reliable test URL (no bot detection)
+VIDEO_URL=${2:-"https://peertube.tv/w/eVYnv2DSiNZjehs1tm39xH"} # Reliable test URL (no bot detection)
 echo "🚀 Submitting Job to: $API_URL/jobs"
 echo "📺 Video URL: $VIDEO_URL"
 

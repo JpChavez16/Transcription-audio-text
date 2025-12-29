@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Podcast Transcriber | Premium AI Service</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="background-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <main class="container">
+        <header class="hero">
+            <h1>Transcription <span class="gradient-text">AI</span></h1>
+            <p class="subtitle">Turn audio streams into actionable text with Neural Fog Computing.</p>
+        </header>
+
+        <section class="card glass-panel" id="input-section">
+            <div class="input-group">
+                <input type="url" id="urlInput" placeholder="Enter Podcast or Video URL" required>
+                <button id="submitBtn" class="btn-primary">
+                    <span class="btn-text">Transcribe</span>
+                    <div class="loader-spinner hidden"></div>
+                </button>
+            </div>
+            <p class="hint">Supported: Peertube, Direct MP3/WAV/AAC</p>
+        </section>
+
+        <!-- Dynamic Content Container -->
+        <div id="status-container" class="hidden">
+            <!-- Job Status Card -->
+            <section class="card glass-panel status-card">
+                <div class="status-header">
+                    <h3 id="status-title">Processing...</h3>
+                    <div class="status-badge" id="status-badge">Phase 1: Streaming</div>
+                </div>
+
+                <div class="progress-container">
+                    <div class="progress-bar-bg">
+                        <div class="progress-bar-fill" id="progress-fill"></div>
+                    </div>
+                </div>
+
+                <div class="log-console" id="log-console">
+                    <div class="log-entry">Initializing connection to Fog Nodes...</div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Results Section -->
+        <div id="results-container" class="hidden">
+            <section class="card glass-panel results-card">
+                <div class="results-header">
+                    <h3>Transcription Complete</h3>
+                    <div class="action-buttons">
+                        <a id="download-txt" class="btn-secondary" href="#" target="_blank">Download .TXT</a>
+                        <a id="download-json" class="btn-secondary" href="#" target="_blank">Download .JSON</a>
+                    </div>
+                </div>
+                <div class="transcription-preview glass-inset">
+                    <p id="preview-text">Loading preview...</p>
+                </div>
+            </section>
+        </div>
+
+    </main>
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>

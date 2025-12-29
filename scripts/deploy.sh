@@ -27,7 +27,7 @@ aws ecr get-login-password --region $REGION | docker login --username AWS --pass
 
 echo "🔨 Building & Pushing Fog Node..."
 cd ../docker/fog-node
-docker build -t "$FOG_REPO:latest" . --quiet
+docker build --no-cache -t "$FOG_REPO:latest" . --quiet
 docker push "$FOG_REPO:latest"
 
 echo "🔨 Building & Pushing Whisper Service..."
@@ -35,9 +35,7 @@ cd ../whisper-service
 docker build -t "$WHISPER_REPO:latest" . --quiet
 docker push "$WHISPER_REPO:latest"
 
-cd ../../scripts
-
-# 5. Connect ECS to new images
+# 3. Connect ECS to new images
 echo "🔄 Forcing ECS Service Deployments..."
 aws ecs update-service --cluster "$CLUSTER_NAME" --service "${PROJECT_NAME}-fog-nodes" --force-new-deployment > /dev/null
 echo "   Updated Fog Nodes"

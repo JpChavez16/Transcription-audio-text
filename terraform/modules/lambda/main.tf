@@ -3,7 +3,7 @@
 # IAM Role for Lambda
 resource "aws_iam_role" "lambda" {
   name = "${var.project_name}-lambda-role"
-  
+
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -14,7 +14,7 @@ resource "aws_iam_role" "lambda" {
       }
     }]
   })
-  
+
   tags = var.tags
 }
 
@@ -32,7 +32,7 @@ resource "aws_iam_role_policy_attachment" "lambda_vpc" {
 resource "aws_iam_role_policy" "lambda_dynamodb" {
   name = "dynamodb-access"
   role = aws_iam_role.lambda.id
-  
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -91,7 +91,7 @@ resource "aws_iam_role_policy" "lambda_s3" {
 resource "aws_iam_role_policy" "lambda_ecs" {
   name = "ecs-access"
   role = aws_iam_role.lambda.id
-  
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -116,22 +116,22 @@ resource "aws_lambda_function" "url_processor" {
   runtime          = "python3.11"
   timeout          = 60
   memory_size      = 512
-  
+
   environment {
     variables = {
-      JOBS_TABLE           = var.jobs_table_name
-      FOG_NODES_DNS        = var.fog_nodes_dns
-      ECS_CLUSTER_NAME     = var.ecs_cluster_name
-      ECS_SERVICE_NAME     = var.ecs_service_name
+      JOBS_TABLE       = var.jobs_table_name
+      FOG_NODES_DNS    = var.fog_nodes_dns
+      ECS_CLUSTER_NAME = var.ecs_cluster_name
+      ECS_SERVICE_NAME = var.ecs_service_name
     }
   }
-  
+
   # VPC Configuration
   vpc_config {
     subnet_ids         = var.private_subnet_ids
     security_group_ids = [var.lambda_security_group_id]
   }
-  
+
   tags = var.tags
 }
 
@@ -145,14 +145,15 @@ resource "aws_lambda_function" "query_handler" {
   runtime          = "python3.11"
   timeout          = 30
   memory_size      = 512
-  
+
   environment {
     variables = {
-      JOBS_TABLE           = var.jobs_table_name
-      TRANSCRIPTIONS_TABLE = var.transcriptions_table_name
+      JOBS_TABLE            = var.jobs_table_name
+      TRANSCRIPTIONS_TABLE  = var.transcriptions_table_name
+      TRANSCRIPTIONS_BUCKET = var.transcriptions_bucket_name
     }
   }
-  
+
   tags = var.tags
 }
 
@@ -166,19 +167,19 @@ resource "aws_lambda_function" "trigger_transcription" {
   runtime          = "python3.11"
   timeout          = 30
   memory_size      = 128
-  
+
   environment {
     variables = {
       WHISPER_SERVICE_DNS = var.whisper_service_dns
     }
   }
-  
+
   # VPC Config required to talk to ECS Fargate in private subnet associated with Service Discovery
   vpc_config {
     subnet_ids         = var.private_subnet_ids
     security_group_ids = [var.lambda_security_group_id]
   }
-  
+
   tags = var.tags
 }
 
@@ -203,9 +204,15 @@ resource "aws_lambda_function" "post_processor" {
   environment {
     variables = {
       TRANSCRIPTIONS_BUCKET = var.transcriptions_bucket_name
-      JOBS_TABLE           = var.jobs_table_name
-      TRANSCRIPTIONS_TABLE = var.transcriptions_table_name
+      JOBS_TABLE            = var.jobs_table_name
+      TRANSCRIPTIONS_TABLE  = var.transcriptions_table_name
     }
+  }
+
+  # VPC Configuration
+  vpc_config {
+    subnet_ids         = var.private_subnet_ids
+    security_group_ids = [var.lambda_security_group_id]
   }
 
   tags = var.tags

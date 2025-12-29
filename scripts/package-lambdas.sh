@@ -4,7 +4,7 @@ echo "📦 Packaging Lambda functions..."
 
 mkdir -p lambda/dist
 
-for func in url_processor query_handler trigger_transcription; do
+for func in query_handler; do
     echo "Packaging $func..."
     cd lambda/$func
 

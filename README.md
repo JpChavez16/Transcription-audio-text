@@ -1,10 +1,10 @@
-# 🎙️ Sistema de Transcripción de Podcasts/Videos
+#  Sistema de Transcripción de Podcasts/Videos
 
 ## Versión 3.0 - Streaming Mode
 
 Sistema de transcripción usando Whisper AI en arquitectura Fog + Serverless.
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # 1. Configurar AWS
@@ -24,18 +24,15 @@ terraform apply
 terraform output
 ```
 
-## 📚 Documentación Completa
+## Documentación Completa
 
 Ver `/docs` para documentación detallada.
 
-## 🎯 Características
+## Características
 
-- ✅ Streaming sin descarga completa
-- ✅ Fog Computing + Serverless
-- ✅ OpenAI Whisper AI
-- ✅ Multi-formato output
-- ✅ 100% Infrastructure as Code
+- Streaming sin descarga completa
+- Fog Computing + Serverless
+- OpenAI Whisper AI
+- Multi-formato output
+- 100% Infrastructure as Code
 
-## 📄 Licencia
-
-MIT License

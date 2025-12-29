@@ -74,6 +74,21 @@ def generate_simple_summary(text: str, max_sentences: int = 3) -> str:
         summary += "."
     return summary
 
+def extract_job_id_from_s3_event(event) -> str:
+    """
+    Extrae job_id desde la key del objeto S3.
+    Espera formato:
+    transcriptions/<job_id>/chunks/chunk_xxx.json
+    """
+    try:
+        record = event["Records"][0]
+        key = record["s3"]["object"]["key"]
+        parts = key.split("/")
+        return parts[1]
+    except Exception:
+        return None
+
+
 
 def upload_text(bucket: str, key: str, content: str):
     s3.put_object(
@@ -124,11 +139,12 @@ def handler(event, context):
     print("📥 Event received:", json.dumps(event))
 
     # ⚠️ Ajusta esto si tu job_id llega de otra forma
-    job_id = event.get("job_id")
+    job_id = extract_job_id_from_s3_event(event)
     if not job_id:
-        raise ValueError("job_id not found in event")
+        raise ValueError("job_id not found in S3 object key")
 
-    chunks_prefix = f"{CHUNKS_PREFIX}/{job_id}/"
+
+    chunks_prefix = f"{OUTPUT_PREFIX}/{job_id}/{CHUNKS_PREFIX}/"
 
     print(f"🔎 Listing chunks in {chunks_prefix}")
     chunk_keys = list_chunk_files(TRANSCRIPTIONS_BUCKET, chunks_prefix)

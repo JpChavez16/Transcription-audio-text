@@ -54,25 +54,38 @@ resource "aws_iam_role_policy" "lambda_dynamodb" {
 }
 
 resource "aws_iam_role_policy" "lambda_s3" {
-  name = "s3-access"
+  name = "s3-and-dynamodb-access"
   role = aws_iam_role.lambda.id
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "s3:GetObject",
-        "s3:PutObject",
-        "s3:ListBucket"
-      ]
-      Resource = [
-        var.transcriptions_bucket_arn,
-        "${var.transcriptions_bucket_arn}/*"
-      ]
-    }]
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          var.transcriptions_bucket_arn,
+          "${var.transcriptions_bucket_arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:UpdateItem"
+        ]
+        Resource = [
+          var.transcriptions_table_arn
+        ]
+      }
+    ]
   })
 }
+
 
 
 resource "aws_iam_role_policy" "lambda_ecs" {
@@ -189,7 +202,7 @@ resource "aws_lambda_function" "post_processor" {
 
   environment {
     variables = {
-      TRANSCRIPTION_BUCKET = var.transcriptions_bucket_name
+      TRANSCRIPTIONS_BUCKET = var.transcriptions_bucket_name
       JOBS_TABLE           = var.jobs_table_name
       TRANSCRIPTIONS_TABLE = var.transcriptions_table_name
     }
@@ -197,6 +210,32 @@ resource "aws_lambda_function" "post_processor" {
 
   tags = var.tags
 }
+
+resource "aws_lambda_permission" "allow_s3_post_processor" {
+  statement_id  = "AllowExecutionFromS3PostProcessor"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.post_processor.function_name
+  principal     = "s3.amazonaws.com"
+  source_arn    = var.transcriptions_bucket_arn
+}
+
+resource "aws_s3_bucket_notification" "post_processor_trigger" {
+  bucket = var.transcriptions_bucket_name
+
+  lambda_function {
+    lambda_function_arn = aws_lambda_function.post_processor.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "transcriptions/"
+    filter_suffix       = ".json"
+  }
+
+  depends_on = [
+    aws_lambda_permission.allow_s3_post_processor
+  ]
+}
+
+
+
 
 
 # Variables

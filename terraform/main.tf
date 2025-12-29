@@ -81,6 +81,7 @@ module "lambda" {
   jobs_table_arn            = module.storage.dynamodb_table_arns.jobs
   transcriptions_table_name = module.storage.dynamodb_tables.transcriptions
   transcriptions_table_arn  = module.storage.dynamodb_table_arns.transcriptions
+  transcriptions_bucket_name = module.storage.s3_buckets.transcriptions
   transcriptions_bucket_arn = module.storage.s3_bucket_arns.transcriptions
   fog_nodes_dns             = module.fog_nodes.service_discovery_dns
   ecs_cluster_name          = module.fog_nodes.cluster_name

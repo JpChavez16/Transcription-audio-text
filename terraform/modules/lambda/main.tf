@@ -56,21 +56,24 @@ resource "aws_iam_role_policy" "lambda_dynamodb" {
 resource "aws_iam_role_policy" "lambda_s3" {
   name = "s3-access"
   role = aws_iam_role.lambda.id
-  
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect = "Allow"
       Action = [
         "s3:GetObject",
-        "s3:PutObject"
+        "s3:PutObject",
+        "s3:ListBucket"
       ]
       Resource = [
+        var.transcriptions_bucket_arn,
         "${var.transcriptions_bucket_arn}/*"
       ]
     }]
   })
 }
+
 
 resource "aws_iam_role_policy" "lambda_ecs" {
   name = "ecs-access"
@@ -174,6 +177,28 @@ resource "aws_lambda_permission" "allow_s3" {
   source_arn    = var.processed_bucket_arn
 }
 
+resource "aws_lambda_function" "post_processor" {
+  filename         = "${path.module}/../../../lambda/dist/post_processor.zip"
+  function_name    = "${var.project_name}-post-processor"
+  role             = aws_iam_role.lambda.arn
+  handler          = "main.handler"
+  source_code_hash = filebase64sha256("${path.module}/../../../lambda/dist/post_processor.zip")
+  runtime          = "python3.11"
+  timeout          = 120
+  memory_size      = 512
+
+  environment {
+    variables = {
+      TRANSCRIPTION_BUCKET = var.transcriptions_bucket_name
+      JOBS_TABLE           = var.jobs_table_name
+      TRANSCRIPTIONS_TABLE = var.transcriptions_table_name
+    }
+  }
+
+  tags = var.tags
+}
+
+
 # Variables
 variable "project_name" {
   type = string
@@ -233,6 +258,11 @@ variable "tags" {
   type = map(string)
 }
 
+variable "transcriptions_bucket_name" {
+  type = string
+}
+
+
 # Outputs
 output "url_processor_function_name" {
   value = aws_lambda_function.url_processor.function_name
@@ -260,4 +290,12 @@ output "query_handler_invoke_arn" {
 
 output "trigger_transcription_function_arn" {
   value = aws_lambda_function.trigger_transcription.arn
+}
+
+output "post_processor_function_name" {
+  value = aws_lambda_function.post_processor.function_name
+}
+
+output "post_processor_arn" {
+  value = aws_lambda_function.post_processor.arn
 }

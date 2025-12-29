@@ -291,7 +291,7 @@
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   ✅ JOB COMPLETED                           │
+│                    JOB COMPLETED                           │
 │                                                               │
 │  Status Update in DynamoDB:                                  │
 │  • status: "completed"                                       │
@@ -306,3 +306,4 @@
 │  • Ver resúmenes y análisis                                 │
 │  • Explorar entities y topics                               │
 └─────────────────────────────────────────────────────────────┘
+```

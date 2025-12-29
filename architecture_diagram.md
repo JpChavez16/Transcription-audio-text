@@ -1,6 +1,6 @@
 # Arquitectura Detallada - Versión 3.0 Streaming Mode
 
-## 🌊 Flujo de Streaming Sin Descarga
+## Flujo de Streaming Sin Descarga
 
 ### **Innovación Principal: FFmpeg Pipe Streaming**
 
@@ -82,7 +82,7 @@
 │  │  └─────────────────────────────────────────────────┘  │  │
 │  └───────────────────────────────────────────────────────┘  │
 │                                                               │
-│  📊 RECURSOS USADOS POR FOG NODE:                            │
+│  RECURSOS USADOS POR FOG NODE:                            │
 │  • Disco: 0 MB (streaming directo)                           │
 │  • Memoria: 150 MB peak (buffer temporal)                    │
 │  • CPU: 60% average (FFmpeg encoding)                        │
@@ -137,8 +137,8 @@
 │  │  Task 5: Processing chunk_004.wav                     │  │
 │  └───────────────────────────────────────────────────────┘  │
 │                                                               │
-│  ⚡ Procesamiento: 5 chunks en paralelo                      │
-│  ⏱️ Tiempo: 120 chunks / 5 tasks = 24 batches × 12s = 4.8min│
+│  Procesamiento: 5 chunks en paralelo                      │
+│  Tiempo: 120 chunks / 5 tasks = 24 batches × 12s = 4.8min│
 │                                                               │
 │  Whisper Model Selection Logic:                             │
 │  ┌───────────────────────────────────────────────────────┐  │
@@ -291,7 +291,7 @@
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   ✅ JOB COMPLETED                           │
+│                    JOB COMPLETED                           │
 │                                                               │
 │  Status Update in DynamoDB:                                  │
 │  • status: "completed"                                       │
@@ -307,123 +307,3 @@
 │  • Explorar entities y topics                               │
 └─────────────────────────────────────────────────────────────┘
 ```
-
----
-
-## 📊 Comparación Streaming vs Batch
-
-### **Recursos por Job (1 hora de audio)**
-
-```
-┌────────────────────────────────────────────────────────────┐
-│              BATCH MODE (Versión Anterior)                  │
-├────────────────────────────────────────────────────────────┤
-│                                                             │
-│  1. Descarga completa:              500 MB video           │
-│  2. Almacenamiento temporal:        550 MB disco           │
-│  3. Extracción audio:                50 MB audio           │
-│  4. Chunks creation:                180 MB chunks          │
-│  5. Upload a S3:                    180 MB                 │
-│                                                             │
-│  Total disco usado:                 780 MB                 │
-│  Memoria peak:                      500 MB                 │
-│  Tiempo inicio:                     120 segundos           │
-│  Tiempo total:                       30 minutos            │
-└────────────────────────────────────────────────────────────┘
-
-┌────────────────────────────────────────────────────────────┐
-│            STREAMING MODE (Versión 3.0)                     │
-├────────────────────────────────────────────────────────────┤
-│                                                             │
-│  1. FFmpeg pipe streaming:            0 MB descarga ✅     │
-│  2. Buffer temporal:                  2 MB memoria  ✅     │
-│  3. Chunks en memoria:              1.5 MB cada uno ✅     │
-│  4. Upload directo S3:              180 MB total    ✅     │
-│                                                             │
-│  Total disco usado:                   0 MB          ✅     │
-│  Memoria peak:                      150 MB          ✅     │
-│  Tiempo inicio:                       3 segundos    ✅     │
-│  Tiempo total:                       18 minutos     ✅     │
-└────────────────────────────────────────────────────────────┘
-
-MEJORAS:
-🚀 100% menos descarga    (500MB → 0MB)
-🚀 99.7% menos disco      (780MB → 2MB)
-🚀 70% menos memoria      (500MB → 150MB)
-🚀 97.5% inicio más rápido (120s → 3s)
-🚀 40% tiempo total        (30min → 18min)
-```
-
----
-
-## ⚡ Timeline Detallado
-
-### **Procesamiento de 1 hora de audio:**
-
-```
-T = 0s
-├─ Usuario envía URL
-└─ API Gateway recibe request
-    │
-T = 1s
-├─ Lambda URL Processor valida
-├─ Job creado en DynamoDB
-└─ Enrutado a Fog Node
-    │
-T = 3s
-├─ Fog Node recibe job
-├─ ffprobe obtiene metadata (sin descarga)
-└─ FFmpeg inicia pipe streaming
-    │
-T = 35s
-├─ Primer chunk (30s) procesado
-├─ Uploaded a S3
-├─ Whisper Task 1 inicia transcripción
-└─ ✅ Primera transcripción disponible
-    │
-T = 2min
-├─ 4 chunks procesados y subidos
-├─ 5 Whisper tasks en paralelo
-└─ Progreso: 10%
-    │
-T = 5min
-├─ Fog completó streaming (todos chunks subidos)
-├─ Whisper procesando chunks en paralelo
-└─ Progreso: 40%
-    │
-T = 12min
-├─ Todos los chunks transcritos
-├─ Post-processor inicia merge
-└─ Progreso: 75%
-    │
-T = 14min
-├─ Transcripción completa merged
-├─ Formatos generados (TXT, SRT, VTT, JSON)
-└─ Progreso: 85%
-    │
-T = 16min
-├─ AI Analysis completado (Bedrock + Comprehend)
-├─ Resúmenes generados
-├─ Entities extraídas
-└─ Progreso: 95%
-    │
-T = 18min
-├─ OpenSearch indexing completado
-├─ Búsqueda full-text disponible
-└─ ✅ JOB COMPLETED (100%)
-```
-
----
-
-## 🎯 Conclusión Técnica
-
-La arquitectura de **Streaming Mode** logra:
-
-1. ✅ **Eliminar descarga completa** mediante FFmpeg pipe
-2. ✅ **Reducir latencia 40%** con procesamiento inmediato
-3. ✅ **Optimizar recursos 80%** usando solo memoria temporal
-4. ✅ **Procesar en paralelo** con 5 Whisper tasks simultáneos
-5. ✅ **Escalar automáticamente** basado en carga
-6. ✅ **Mantener calidad** con Whisper state-of-the-art
-
-**Innovación clave:** Fog Computing + Streaming Processing + Serverless = Arquitectura híbrida óptima para transcripción de medios a escala.
